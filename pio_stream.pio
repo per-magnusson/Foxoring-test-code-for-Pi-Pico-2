@@ -1,0 +1,37 @@
+;
+; Copyright (c) 2020 Raspberry Pi (Trading) Ltd.
+;
+; SPDX-License-Identifier: BSD-3-Clause
+;
+
+.program pio_serialiser
+
+; Repeatedly get one word of data from the TX FIFO, stalling when the FIFO is
+; empty. Write the two least significant bits to the two pins in the OUT pin group.
+; Extra instructions to figure out the opcodes for setting pins as outputs and inputs.
+
+         
+.wrap_target
+    out    pins, 2
+.wrap
+    set  pindirs, 3 // two outputs
+    set  pindirs, 0 // two inputs
+% c-sdk {
+
+
+
+static inline void pio_serialiser_program_init(PIO pio, uint sm, uint offset, uint first_data_pin, float clk_div) {
+    pio_gpio_init(pio, first_data_pin);
+    pio_gpio_init(pio, first_data_pin+1);
+    pio_sm_set_consecutive_pindirs(pio, sm, first_data_pin, 2, true);
+    pio_sm_config c = pio_serialiser_program_get_default_config(offset);
+    sm_config_set_out_pins(&c, first_data_pin, 2); // Pins affected by out
+    sm_config_set_set_pins(&c, first_data_pin, 2); // Pins affected by set
+    sm_config_set_fifo_join(&c, PIO_FIFO_JOIN_TX);
+    sm_config_set_clkdiv(&c, clk_div);
+    sm_config_set_out_shift(&c, true, true, 32);
+    pio_sm_init(pio, sm, offset, &c);
+    pio_sm_set_enabled(pio, sm, true);
+}
+
+%}
