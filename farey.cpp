@@ -25,7 +25,7 @@
 // More details about this can be found here:
 // https://axotron.se/blog/fast-algorithm-for-rational-approximation-of-floating-point-numbers/
 //
-// Per Magnusson, SA5BYZ, 2024
+// Per Magnusson, SA5BYZ, 2024, 2025
 // MIT license
 //
 
@@ -40,7 +40,6 @@ rational_t rational_approximation(double target, uint32_t maxdenom)
                       // to deal with single-digit differences 
                       // between numbers above 10^8.
   double N, Ndenom, Ndenom_min;
-  double epsilon = 1e-10; // To handle rounding issues in conjunction with floor
   uint32_t a = 0, b = 1, c = 1, d = 1, ac, bd, Nint;
   const int maxIter = 100;
 
@@ -70,6 +69,9 @@ rational_t rational_approximation(double target, uint32_t maxdenom)
     if(bd > maxdenom || ii > maxIter) {
       // The denominator has become too big, or too many iterations.  
     	// Select the best of a/b and c/d.
+      if(ii > maxIter) { // ###################################
+        Serial.println("Hit max iterations!");
+      }
       if(target - a/(double)b < c/(double)d - target) {
         ac = a;
         bd = b;
@@ -80,6 +82,7 @@ rational_t rational_approximation(double target, uint32_t maxdenom)
       break;
     }
     mediant = ac/(double)bd;
+    //Serial.printf("a = %lu, b = %lu, c = %lu, d = %lu, ac = %lu, bd = %lu, mediant = %.10g\n", a, b, c, d, ac, bd, mediant); // ######################################
     if(target < mediant) {
       // Discard c/d as the mediant is closer to the target.
       // How many times in a row should we do that?
@@ -96,7 +99,11 @@ rational_t rational_approximation(double target, uint32_t maxdenom)
         break;
       }
       N = (c - target * (double)d)/Ndenom;
-      Nint = floor(N + epsilon);
+      Nint = floor(N);
+      if(Nint < 1) {
+        // Nint should be at least 1, a rounding error may cause N to be just less than that
+        Nint = 1;
+      }
       // Check if the denominator will become too large
       if(d + Nint*b > maxdenom) {
         // Limit N, as the denominator would otherwise become too large
@@ -108,7 +115,6 @@ rational_t rational_approximation(double target, uint32_t maxdenom)
       d = d + Nint*b;
 
     } else {
-
       // Discard a/b as the mediant is closer to the target.
       // How many times in a row should we do that?
       // N = (target*b - a)/(c - target*d), but need to check for division by zero
@@ -124,7 +130,11 @@ rational_t rational_approximation(double target, uint32_t maxdenom)
         break;
       }
       N = (target * (double)b - a)/Ndenom;
-      Nint = floor(N + epsilon);
+      Nint = floor(N);
+      if(Nint < 1) {
+        // Nint should be at least 1, a rounding error may cause N to be just less than that
+        Nint = 1;
+      }
       // Check if the denominator will become too large
       if(b + Nint*d > maxdenom) {
         // Limit N, as the denominator would otherwise become too large
@@ -140,6 +150,7 @@ rational_t rational_approximation(double target, uint32_t maxdenom)
 
   retval.numerator = ac;
   retval.denominator = bd;
+  retval.iterations = ii;
   return retval;
 }
 
@@ -149,6 +160,7 @@ typedef struct {
   uint32_t maxdenom;
   uint32_t expected_numerator;
   uint32_t expected_denominator;
+  uint32_t maxiter;
 } rational_test_case_t;
 
 
@@ -157,36 +169,39 @@ void test_rational_approx()
   rational_t result;
 
   rational_test_case_t test[] = { 
-    {0, 3000, 0, 1},
-    {1, 3000, 1, 1},
-    {0.5, 3000, 1, 2},
-    {0.5+1/3001.0, 3000, 751, 1501},
-    {1/3001.0, 2500, 1, 2500},
-    {1/3001.0, 1500, 0, 1},
-    {1/3001.0, 3001, 1, 3001},
-    {0.472757439, 1816, 564, 1193},
-    {0.472757439, 1817, 859, 1817},
-    {0.288, 100000000, 36, 125},
+    {0, 3000, 0, 1, 2},
+    {1, 3000, 1, 1, 2},
+    {0.5, 3000, 1, 2, 2},
+    {0.5+1/3001.0, 3000, 751, 1501, 5},
+    {1/3001.0, 2500, 1, 2500, 2},
+    {1/3001.0, 1500, 0, 1, 2},
+    {1/3001.0, 3001, 1, 3001, 2},
+    {0.472757439, 1816, 564, 1193, 10},
+    {0.472757439, 1817, 859, 1817, 10},
+    {0.288, 100000000, 36, 125, 10},
+    {0.47195, 1048575, 9439, 20000, 12},
+    {1/128.0, 1048575, 1, 128, 12},
+    {1/4096.0, 1048575, 1, 4096, 12},
+    {1/16384.0, 1048575, 1, 16384, 12},
+    {1/65536.0, 1048575, 1, 65536, 12},
+    {17/65536.0, 1048575, 17, 65536, 12},
+    {32769/65536.0, 1048575, 32769, 65536, 12},
   };
   uint32_t n_tests = sizeof(test)/sizeof(test[0]);
 
   for(uint32_t ii = 0; ii < n_tests; ii++) {
     result = rational_approximation(test[ii].target, test[ii].maxdenom);
-    Serial.print("target = ");
-    Serial.print(test[ii].target, 7);
-    Serial.print(", maxdenom = ");
-    Serial.print(test[ii].maxdenom);
-    Serial.print(", approx = ");
-    Serial.print(result.numerator);
-    Serial.print("/");
-    Serial.print(result.denominator);
-    if(result.numerator == test[ii].expected_numerator && result.denominator == test[ii].expected_denominator) {
+    Serial.printf("target = %.8g, maxdenom = %lu, ", test[ii].target, test[ii].maxdenom);
+    Serial.printf("approx = %lu/%lu, iter = %lu ", result.numerator, result.denominator, result.iterations);
+    if(result.numerator == test[ii].expected_numerator && 
+       result.denominator == test[ii].expected_denominator && 
+       result.iterations <= test[ii].maxiter) {
       Serial.println(" OK");
     } else {
-      Serial.print(" Expected: ");
-      Serial.print(test[ii].expected_numerator);
-      Serial.print("/");
-      Serial.println(test[ii].expected_denominator);
+      if(result.iterations > test[ii].maxiter) {
+        Serial.printf("Too many iterations (max %lu) ", test[ii].maxiter);
+      }
+      Serial.printf("Expected %lu/%lu\n", test[ii].expected_numerator, test[ii].expected_denominator);
     }
   }
 }
